@@ -18,6 +18,28 @@ static char *link_name = NULL;
 static int link_created = 0;
 static enum {GPS_NEMA, GPS_LEICA} mode = GPS_NEMA;
 
+
+static int format_gprmc(char *buf, size_t max_size, int fix) {
+    char temp[512];
+    char time_buf[32];
+    char date_buf[32];
+    uint8_t checksum = 0;
+    int i = 0;
+    time_t current_time = time(NULL); 
+
+    strftime(time_buf, sizeof(time_buf), "%H%M%S", localtime(&current_time));
+    strftime(date_buf, sizeof(date_buf), "%d%m%y", localtime(&current_time));
+
+    snprintf(temp, sizeof(temp), "$GPRMC,%s,%c,4124.8963,N,08151.6838,W,022.4,084.4,%s,033.1,W", time_buf, (fix > 0) ? 'A' : 'V', date_buf);
+
+    for (i = 0; i < strlen(temp); i++) {
+        checksum ^= temp[i];
+    }
+
+    snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
+    return 1;
+}
+
 /* Sourced http://aprs.gids.nl/nmea/
  * eg3. $GPGGA,hhmmss.ss,llll.ll,a,yyyyy.yy,a,x,xx,x.x,x.x,M,x.x,M,x.x,xxxx*hh
  * 1    = UTC of Position
@@ -99,6 +121,7 @@ int main(int argc, char *argv[])
             printf("hdop = %.1f, %s\n", hdop, optarg);
             break;
         default:
+            usage();
             exit(1);
             break;
         }
@@ -167,6 +190,13 @@ start:
         if (rc == 0) {
             /* Timeout */
             format_gpgga(buffer, sizeof(buffer), fix, num_satellites, hdop);
+            rc = write(pt, buffer, strlen(buffer));
+            if (rc < 0) {
+                perror("write() failed");
+                break;
+            }
+
+            format_gprmc(buffer, sizeof(buffer), fix);
             rc = write(pt, buffer, strlen(buffer));
             if (rc < 0) {
                 perror("write() failed");
