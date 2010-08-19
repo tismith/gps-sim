@@ -18,6 +18,14 @@ static char *link_name = NULL;
 static int link_created = 0;
 static enum {GPS_NEMA, GPS_LEICA} mode = GPS_NEMA;
 
+uint8_t do_checksum(char *buf) {
+    int i = 0;
+    uint8_t retval = 0;
+    for (i = 0; i < strlen(buf); i++) {
+        retval ^= buf[i];
+    }
+    return retval;
+}
 
 static int format_gprmc(char *buf, size_t max_size, int fix) {
     char temp[512];
@@ -32,9 +40,7 @@ static int format_gprmc(char *buf, size_t max_size, int fix) {
 
     snprintf(temp, sizeof(temp), "$GPRMC,%s,%c,4124.8963,N,08151.6838,W,022.4,084.4,%s,033.1,W", time_buf, (fix > 0) ? 'A' : 'V', date_buf);
 
-    for (i = 0; i < strlen(temp); i++) {
-        checksum ^= temp[i];
-    }
+    checksum = do_checksum(temp);
 
     snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
     return 1;
@@ -70,9 +76,8 @@ static int format_gpgga(char*buf, size_t max_size, int fix, int num_satellites, 
 
     snprintf(temp, sizeof(temp), "$GPGGA,%s.00,4124.8963,N,08151.6838,W,%d,%2.02d,%.1f,280.2,M,-34.0,M,,", time_buf, fix, num_satellites, hdop);
 
-    for (i = 0; i < strlen(temp); i++) {
-        checksum ^= temp[i];
-    }
+    checksum = do_checksum(temp);
+
     snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
     return 1;
 }
@@ -173,6 +178,7 @@ start:
 
     FD_ZERO(&master_set);
     FD_SET(pt, &master_set);
+    FD_SET(0, &master_set);
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     do {
@@ -222,6 +228,22 @@ start:
             } else {
                 buffer[rc] = '\0';
                 printf("%s", buffer);
+            }
+            memset(buffer, '\0', sizeof(buffer));
+        }
+
+        if (FD_ISSET(0, &working_set)) {
+            rc = read(0, buffer, sizeof(buffer) - 1);
+            if (rc < 0) {
+                perror("read() failed");
+                break;
+            } else {
+                buffer[rc] = '\0';
+                /* FIXME - do more here */
+                if (*buffer == 'x') 
+                    fix = 0;
+                if (*buffer == 'g')
+                    fix = 1;
             }
             memset(buffer, '\0', sizeof(buffer));
         }
