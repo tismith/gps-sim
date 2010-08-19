@@ -1,10 +1,18 @@
-#define _XOPEN_SOURCE
-#include <stdlib.h>
+#define _XOPEN_SOURCE //for char*ptsname(int)
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
-#include <util.h>
 #include <string.h>
 #include <time.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <termios.h>
+#include <signal.h>
+
+static char *link_name = NULL;
+static int link_created = 0;
 
 /* Sourced http://aprs.gids.nl/nmea/
  * eg3. $GPGGA,hhmmss.ss,llll.ll,a,yyyyy.yy,a,x,xx,x.x,x.x,M,x.x,M,x.x,xxxx*hh
@@ -33,13 +41,37 @@ static int format_gpgga(char*buf, size_t max_size) {
     return 1;
 }
 
+static void handle_quit(int signal) {
+    if (link_created && link_name) {
+        unlink(link_name);
+    }
+    exit(1);
+}
+
 int main(int argc, char *argv[])
 {
     int pt;
-    struct fd_set master_set, working_set, error_set;
+    fd_set master_set, working_set, error_set;
     struct timeval timeout;
     char buffer[512];
     struct termios tio;
+    int opt;
+
+    while ((opt = getopt(argc, argv, "l:")) != -1) {
+        switch (opt) {
+        case 'l':
+            link_name = optarg;
+            break;
+        default:
+            exit(1);
+            break;
+        }
+    }
+
+    signal(SIGQUIT, handle_quit);
+    signal(SIGINT, handle_quit);
+
+start:
 
     pt = open("/dev/ptmx", O_RDWR | O_NOCTTY);
 
@@ -49,34 +81,46 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    grantpt(pt);
-    unlockpt(pt);
-
-    fprintf(stderr, "Slave device: %s\n", ptsname(pt));
-
     if (tcgetattr(pt, &tio) < 0) {
         perror("tcgetattr() failed");
         return 1;
     }
 
     /* disable echo etc */
-    tio.c_lflag &= ~(ECHO|ICANON);
+    tio.c_cc[VEOF]      = 1;
+    tio.c_iflag         = BRKINT|ISTRIP|IXON|IXANY;
+    tio.c_oflag         = 0;
+    tio.c_cflag         = 0;
+    tio.c_lflag         = 0;
 
-    if (tcsetattr(pt, TCSAFLUSH, &tio) < 0) {
+    if (tcsetattr(pt, TCSANOW, &tio) < 0) {
         perror("tcsetattr() failed");
         return 1;
     }
 
+    grantpt(pt);
+    unlockpt(pt);
+
+    if (link_name) {
+        if (symlink(ptsname(pt), link_name) < 0) {
+            perror("symlink failed");
+            exit(1);
+        }
+        link_created = 1;
+        fprintf(stderr, "Slave device: %s\n", link_name);
+    } else {
+        fprintf(stderr, "Slave device: %s\n", ptsname(pt));
+    }
+
     FD_ZERO(&master_set);
     FD_SET(pt, &master_set);
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
     do {
         int rc = 0;
 
         memcpy(&working_set, &master_set, sizeof(master_set));
         memcpy(&error_set, &master_set, sizeof(master_set));
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
-        
         rc = select(pt+1, &working_set, NULL, &error_set, &timeout);
 
         if (rc < 0) {
@@ -86,13 +130,16 @@ int main(int argc, char *argv[])
 
         if (rc == 0) {
             /* Timeout */
-            printf("WRITING:");
             format_gpgga(buffer, sizeof(buffer));
-            rc = write(pt, buffer, strlen(buffer), strlen(buffer));
+            rc = write(pt, buffer, strlen(buffer));
             if (rc < 0) {
                 perror("write() failed");
                 break;
             }
+
+            /* reset the timer */
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
             continue;
         } 
 
@@ -107,7 +154,6 @@ int main(int argc, char *argv[])
                 perror("read() failed");
                 break;
             } else {
-                printf("READING:");
                 buffer[rc] = '\0';
                 printf("%s", buffer);
             }
@@ -115,6 +161,13 @@ int main(int argc, char *argv[])
         }
 
     } while (1);
+
+    if (link_name) {
+        unlink(link_name);
+    }
+
+    goto start;
+
     return 0;
 }
 
