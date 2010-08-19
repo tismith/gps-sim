@@ -10,9 +10,13 @@
 #include <unistd.h>
 #include <termios.h>
 #include <signal.h>
+#include <stdint.h>
+
+#define GETOPT_FORMAT "Nl:s:f:h:"
 
 static char *link_name = NULL;
 static int link_created = 0;
+static enum {GPS_NEMA, GPS_LEICA} mode = GPS_NEMA;
 
 /* Sourced http://aprs.gids.nl/nmea/
  * eg3. $GPGGA,hhmmss.ss,llll.ll,a,yyyyy.yy,a,x,xx,x.x,x.x,M,x.x,M,x.x,xxxx*hh
@@ -33,11 +37,21 @@ static int link_created = 0;
  *        14   = Diff. reference station ID#
  *        15   = Checksum
  */
-static int format_gpgga(char*buf, size_t max_size) {
+static int format_gpgga(char*buf, size_t max_size, int fix, int num_satellites, double hdop) {
+    char temp[512];
     char time_buf[32];
+    uint8_t checksum = 0;
+    int i = 0;
     time_t current_time = time(NULL); 
+
     strftime(time_buf, sizeof(time_buf), "%H%M%S", localtime(&current_time));
-    snprintf(buf, max_size, "$GPGGA,%s.00,MORE-TO-COME\r\n", time_buf);
+
+    snprintf(temp, sizeof(temp), "$GPGGA,%s.00,4124.8963,N,08151.6838,W,%d,%2.02d,%.1f,280.2,M,-34.0,M,,", time_buf, fix, num_satellites, hdop);
+
+    for (i = 0; i < strlen(temp); i++) {
+        checksum ^= temp[i];
+    }
+    snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
     return 1;
 }
 
@@ -48,6 +62,11 @@ static void handle_quit(int signal) {
     exit(1);
 }
 
+static void usage(void) {
+    printf(GETOPT_FORMAT "\n");
+    return;
+}
+
 int main(int argc, char *argv[])
 {
     int pt;
@@ -56,11 +75,28 @@ int main(int argc, char *argv[])
     char buffer[512];
     struct termios tio;
     int opt;
+    int fix = 1, num_satellites = 5;
+    double hdop = 0.5;
 
-    while ((opt = getopt(argc, argv, "l:")) != -1) {
+    while ((opt = getopt(argc, argv, GETOPT_FORMAT)) != -1) {
         switch (opt) {
+        case 'N':
+            mode = GPS_NEMA;
+            break;
         case 'l':
             link_name = optarg;
+            break;
+        case 's':
+            num_satellites = atoi(optarg);
+            printf("num_satellites = %d\n", num_satellites);
+            break;
+        case 'f':
+            fix = atoi(optarg);
+            printf("fix = %d\n", fix);
+            break;
+        case 'h':
+            hdop = atof(optarg);
+            printf("hdop = %.1f, %s\n", hdop, optarg);
             break;
         default:
             exit(1);
@@ -130,7 +166,7 @@ start:
 
         if (rc == 0) {
             /* Timeout */
-            format_gpgga(buffer, sizeof(buffer));
+            format_gpgga(buffer, sizeof(buffer), fix, num_satellites, hdop);
             rc = write(pt, buffer, strlen(buffer));
             if (rc < 0) {
                 perror("write() failed");
@@ -166,6 +202,8 @@ start:
         unlink(link_name);
     }
 
+    close(pt);
+    
     goto start;
 
     return 0;
