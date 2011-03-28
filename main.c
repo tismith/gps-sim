@@ -16,7 +16,9 @@
 
 static char *link_name = NULL;
 static int link_created = 0;
-static enum {GPS_NEMA, GPS_LEICA} mode = GPS_NEMA;
+static enum {GPS_NMEA, GPS_LEICA} mode = GPS_NMEA;
+//static double latitude = 4124.8963, longtitude = 8151.6838;
+static double latitude = 8279.8223, longtitude = 5354.704;
 
 uint8_t do_checksum(char *buf) {
     int i = 0;
@@ -38,11 +40,14 @@ static int format_gprmc(char *buf, size_t max_size, int fix) {
     strftime(time_buf, sizeof(time_buf), "%H%M%S", localtime(&current_time));
     strftime(date_buf, sizeof(date_buf), "%d%m%y", localtime(&current_time));
 
-    snprintf(temp, sizeof(temp), "$GPRMC,%s,%c,4124.8963,N,08151.6838,W,022.4,084.4,%s,033.1,W", time_buf, (fix > 0) ? 'A' : 'V', date_buf);
+    snprintf(temp, sizeof(temp), "GPRMC,%s,%c,%.4f,N,%.4f,W,022.4,084.4,%s,033.1,W", time_buf, (fix > 0) ? 'A' : 'V', latitude, longtitude, date_buf);
+
+    latitude += random() % 10; 
+    longtitude += random() % 10;
 
     checksum = do_checksum(temp);
 
-    snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
+    snprintf(buf, max_size, "$%s*%2.02X\n", temp, checksum);
     return 1;
 }
 
@@ -74,11 +79,11 @@ static int format_gpgga(char*buf, size_t max_size, int fix, int num_satellites, 
 
     strftime(time_buf, sizeof(time_buf), "%H%M%S", localtime(&current_time));
 
-    snprintf(temp, sizeof(temp), "$GPGGA,%s.00,4124.8963,N,08151.6838,W,%d,%2.02d,%.1f,280.2,M,-34.0,M,,", time_buf, fix, num_satellites, hdop);
+    snprintf(temp, sizeof(temp), "GPGGA,%s.00,%.4f,N,%.4f,W,%d,%2.02d,%.1f,280.2,M,-34.0,M,,", time_buf, latitude, longtitude, fix, num_satellites, hdop);
 
     checksum = do_checksum(temp);
 
-    snprintf(buf, max_size, "%s*%2.02X\n", temp, checksum);
+    snprintf(buf, max_size, "$%s*%2.02X\n", temp, checksum);
     return 1;
 }
 
@@ -108,7 +113,7 @@ int main(int argc, char *argv[])
     while ((opt = getopt(argc, argv, GETOPT_FORMAT)) != -1) {
         switch (opt) {
         case 'N':
-            mode = GPS_NEMA;
+            mode = GPS_NMEA;
             break;
         case 'l':
             link_name = optarg;
