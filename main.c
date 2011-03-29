@@ -245,10 +245,13 @@ start:
             } else {
                 buffer[rc] = '\0';
                 /* FIXME - do more here */
-                if (*buffer == 'x') 
-                    fix = 0;
-                if (*buffer == 'g')
+                if (*buffer == 'x') {
+                    if (num_satellites > 0) num_satellites -= 1;
+                    if (num_satellites == 0) fix = 0;
+                } else if (*buffer == 'a') {
+                    if (num_satellites < 12) num_satellites += 1;
                     fix = 1;
+                }
             }
             memset(buffer, '\0', sizeof(buffer));
         }
