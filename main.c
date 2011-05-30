@@ -1,3 +1,5 @@
+/* Copyright 2011 Toby Smith toby@tismith.id.au */
+
 #define _XOPEN_SOURCE //for char*ptsname(int)
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +18,7 @@
 
 static char *link_name = NULL;
 static int link_created = 0;
-static enum {GPS_NMEA, GPS_LEICA} mode = GPS_NMEA;
+static enum {GPS_NMEA} mode = GPS_NMEA;
 //static double latitude = 4124.8963, longtitude = 8151.6838;
 static double latitude = 8279.8223, longtitude = 5354.704;
 
@@ -42,8 +44,8 @@ static int format_gprmc(char *buf, size_t max_size, int fix) {
 
     snprintf(temp, sizeof(temp), "GPRMC,%s,%c,%.4f,N,%.4f,W,022.4,084.4,%s,033.1,W", time_buf, (fix > 0) ? 'A' : 'V', latitude, longtitude, date_buf);
 
-    latitude += random() % 10; 
-    longtitude += random() % 10;
+    latitude += ((random() % 100) > 50 ? -1 : 1) * (random() % 10); 
+    longtitude += ((random() % 100) > 50 ? -1 : 1) * (random() % 10); 
 
     checksum = do_checksum(temp);
 
