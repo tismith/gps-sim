@@ -196,8 +196,8 @@ start:
     pt = create_pt();
     if (pt < 0) { 
       perror("Could not create pseudo terminal");
+      exit(1);
     }
-
     grantpt(pt);
     unlockpt(pt);
 
