@@ -14,7 +14,7 @@
 #include <signal.h>
 #include <stdint.h>
 
-#define GETOPT_FORMAT "Nl:s:f:h:"
+#define GETOPT_FORMAT "Nl:s:f:h:t:"
 
 static char *link_name = NULL;
 static int link_created = 0;
@@ -96,54 +96,22 @@ static void handle_quit(int signal) {
     exit(1);
 }
 
-static void usage(void) {
-    printf(GETOPT_FORMAT "\n");
-    return;
+static void set_timeval_for_sample_rate(int sample_rate, struct timeval* t) {
+    if (sample_rate <= 1) {
+	 t->tv_sec = 1;
+         t->tv_usec = 0;
+    } else {
+        t->tv_sec = 0;
+        t->tv_usec = 1000000/sample_rate; 
+    }
 }
 
-int main(int argc, char *argv[])
-{
-    int pt;
-    fd_set master_set, working_set, error_set;
-    struct timeval timeout;
-    char buffer[512];
-    struct termios tio;
-    int opt;
-    int fix = 1, num_satellites = 5;
-    double hdop = 0.5;
-
-    while ((opt = getopt(argc, argv, GETOPT_FORMAT)) != -1) {
-        switch (opt) {
-        case 'N':
-            mode = GPS_NMEA;
-            break;
-        case 'l':
-            link_name = optarg;
-            break;
-        case 's':
-            num_satellites = atoi(optarg);
-            printf("num_satellites = %d\n", num_satellites);
-            break;
-        case 'f':
-            fix = atoi(optarg);
-            printf("fix = %d\n", fix);
-            break;
-        case 'h':
-            hdop = atof(optarg);
-            printf("hdop = %.1f, %s\n", hdop, optarg);
-            break;
-        default:
-            usage();
-            exit(1);
-            break;
-        }
-    }
-
-    signal(SIGQUIT, handle_quit);
-    signal(SIGINT, handle_quit);
-
-start:
-
+#ifndef USE_DEV_PTMX
+static int create_pt() {
+  return posix_openpt(O_RDWR | O_NOCTTY);
+}
+#else
+static int create_pt() {
     pt = open("/dev/ptmx", O_RDWR | O_NOCTTY);
 
     if (pt < 0)
@@ -168,6 +136,67 @@ start:
         perror("tcsetattr() failed");
         return 1;
     }
+}
+#endif
+
+
+static void usage(void) {
+    printf(GETOPT_FORMAT "\n");
+    return;
+}
+
+int main(int argc, char *argv[])
+{
+    int pt;
+    fd_set master_set, working_set, error_set;
+    struct timeval timeout;
+    char buffer[512];
+    struct termios tio;
+    int opt;
+    int fix = 1, num_satellites = 5;
+    double hdop = 0.5;
+    int sample_rate = 1;
+
+    while ((opt = getopt(argc, argv, GETOPT_FORMAT)) != -1) {
+        switch (opt) {
+        case 'N':
+            mode = GPS_NMEA;
+            break;
+        case 'l':
+            link_name = optarg;
+            break;
+        case 's':
+            num_satellites = atoi(optarg);
+            printf("num_satellites = %d\n", num_satellites);
+            break;
+        case 'f':
+            fix = atoi(optarg);
+            printf("fix = %d\n", fix);
+            break;
+        case 'h':
+            hdop = atof(optarg);
+            printf("hdop = %.1f, %s\n", hdop, optarg);
+            break;
+        case 't':
+            sample_rate = atoi(optarg);
+	    printf("sample_rate = %dhz, %s\n", sample_rate, optarg);
+            break;
+        default:
+            usage();
+            exit(1);
+            break;
+        }
+    }
+
+    signal(SIGQUIT, handle_quit);
+    signal(SIGINT, handle_quit);
+
+start:
+
+    pt = create_pt();
+    if (pt < 0) { 
+      perror("Could not create pseudo terminal");
+    }
 
     grantpt(pt);
     unlockpt(pt);
@@ -186,8 +215,8 @@ start:
     FD_ZERO(&master_set);
     FD_SET(pt, &master_set);
     FD_SET(0, &master_set);
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
+    
+    set_timeval_for_sample_rate(sample_rate, &timeout);
     do {
         int rc = 0;
 
@@ -217,8 +246,7 @@ start:
             }
 
             /* reset the timer */
-            timeout.tv_sec = 1;
-            timeout.tv_usec = 0;
+            set_timeval_for_sample_rate(sample_rate, &timeout);
             continue;
         } 
 
